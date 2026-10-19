@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <array>
 #include <map>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -49,6 +50,26 @@ private:
     Bytes bytes_;
     const Decompressor& decompressor_;
     std::map<std::string, Entry, std::less<>> entries_;
+};
+// An extracted (non-installer) LF2 v2.0a game folder, identified by its lf2.exe.
+inline constexpr std::size_t folder_exe_size = 3'424'256;
+// Succeeds when `source` holds the supported lf2.exe (size and SHA-256) and data/data.txt.
+Result<void> identify_folder(const ResourceSource& source);
+class DirectoryArchive final : public ResourceSource {
+public:
+    DirectoryArchive() = default;
+    static Result<std::unique_ptr<DirectoryArchive>> open(const std::filesystem::path& root);
+    Result<Bytes> read(std::string_view path) const override;
+    [[nodiscard]] std::size_t file_count() const { return files_.size(); }
+    // Normalized virtual paths in lexical order.
+    [[nodiscard]] std::vector<std::string> paths() const {
+        std::vector<std::string> names;
+        names.reserve(files_.size());
+        for (const auto& entry : files_) names.push_back(entry.first);
+        return names;
+    }
+private:
+    std::map<std::string, std::filesystem::path, std::less<>> files_;
 };
 Result<Bytes> bitmap_resource(std::span<const char> executable, std::string_view name);
 // Initialized data of a PE32 executable at a virtual address (e.g. the original game's recording key).
