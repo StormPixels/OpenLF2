@@ -277,4 +277,59 @@ Result<Bytes> InstallerArchive::read(std::string_view path) const {
     if (!result) result.error().message = *normalized + ": " + result.error().message;
     return result;
 }
+
+namespace {
+constexpr std::string_view folder_exe_sha256 =
+    "12dfa00f6b767508612550e9ab27ab74b4201ff4cb9ff31d068925924eab8fc5";
+constexpr std::size_t folder_file_limit = 64 * 1024 * 1024;
+}
+
+Result<void> identify_folder(const ResourceSource& source) {
+    auto exe = source.read("lf2.exe");
+    if (!exe) return std::unexpected(exe.error());
+    if (exe->size() != folder_exe_size) {
+        return fail(ErrorCode::unsupported, "lf2.exe is " + std::to_string(exe->size()) +
+            " bytes; the supported LF2 v2.0a lf2.exe is " + std::to_string(folder_exe_size) + " bytes");
+    }
+    auto digest = sha256(*exe);
+    if (!digest) return std::unexpected(digest.error());
+    if (*digest != folder_exe_sha256) {
+        return fail(ErrorCode::unsupported,
+            "lf2.exe does not match supported LF2 v2.0a SHA-256 (got " + std::string(*digest) + ")");
+    }
+    if (auto data = source.read("data/data.txt"); !data) return std::unexpected(data.error());
+    return {};
+}
+
+Result<std::unique_ptr<DirectoryArchive>> DirectoryArchive::open(const std::filesystem::path& root) {
+    std::error_code ec;
+    if (!std::filesystem::is_directory(root, ec)) {
+        return fail(ErrorCode::io, "LF2 folder not found: " + root.string());
+    }
+    auto archive = std::make_unique<DirectoryArchive>();
+    const std::filesystem::recursive_directory_iterator end;
+    for (std::filesystem::recursive_directory_iterator it(root, ec); !ec && it != end; it.increment(ec)) {
+        std::error_code entry_ec;
+        if (!it->is_regular_file(entry_ec) || entry_ec) continue;
+        const auto relative = std::filesystem::relative(it->path(), root, entry_ec);
+        if (entry_ec) continue;
+        auto path = virtual_path(relative.generic_string());
+        if (!path) continue;  // names that cannot be normalized are not game resources
+        archive->files_.emplace(*path, it->path());  // first file wins if names differ only by case
+    }
+    if (ec) return fail(ErrorCode::io, "cannot list LF2 folder: " + ec.message());
+    auto identified = identify_folder(*archive);
+    if (!identified) return std::unexpected(identified.error());
+    return archive;
+}
+
+Result<Bytes> DirectoryArchive::read(std::string_view path) const {
+    auto normalized = virtual_path(path);
+    if (!normalized) return std::unexpected(normalized.error());
+    const auto file = files_.find(*normalized);
+    if (file == files_.end()) return fail(ErrorCode::io, "folder resource missing: " + *normalized);
+    auto result = read_file(file->second, folder_file_limit);
+    if (!result) result.error().message = *normalized + ": " + result.error().message;
+    return result;
+}
 }
