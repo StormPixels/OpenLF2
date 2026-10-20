@@ -285,19 +285,16 @@ constexpr std::string_view folder_exe_sha256 =
 constexpr std::size_t folder_file_limit = 64 * 1024 * 1024;
 }
 
+// The folder's lf2.exe is no longer required to be the original LF2 v2.0a: its size and SHA-256 are only logged.
 Result<void> identify_folder(const ResourceSource& source) {
     auto exe = source.read("lf2.exe");
     if (!exe) return std::unexpected(exe.error());
-    if (exe->size() != folder_exe_size) {
-        return fail(ErrorCode::unsupported, "lf2.exe is " + std::to_string(exe->size()) +
-            " bytes; the supported LF2 v2.0a lf2.exe is " + std::to_string(folder_exe_size) + " bytes");
-    }
+    const bool same_size = exe->size() == folder_exe_size;
     auto digest = sha256(*exe);
-    if (!digest) return std::unexpected(digest.error());
-    if (*digest != folder_exe_sha256) {
-        return fail(ErrorCode::unsupported,
-            "lf2.exe does not match supported LF2 v2.0a SHA-256 (got " + std::string(*digest) + ")");
-    }
+    const bool same_digest = digest && *digest == folder_exe_sha256;
+    std::fprintf(stderr, "[folder] lf2.exe is %zu bytes (LF2 v2.0a: %s), SHA-256 %s; size and hash are not enforced\n",
+        static_cast<std::size_t>(exe->size()), same_size ? "same size" : "different size",
+        same_digest ? "matches LF2 v2.0a" : "differs from LF2 v2.0a");
     if (auto data = source.read("data/data.txt"); !data) return std::unexpected(data.error());
     return {};
 }
