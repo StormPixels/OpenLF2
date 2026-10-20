@@ -11,6 +11,14 @@
 #include "openlf2/resources/recording.hpp"
 #include <cstdio>
 #include <ctime>
+#ifdef __ANDROID__
+#include <csignal>
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/ucontext.h>
+#include <unistd.h>
+#include <unwind.h>
+#endif
 #include "openlf2/ports/download.hpp"
 #include "openlf2/ports/platform.hpp"
 #include "openlf2/ports/scripts.hpp"
@@ -1359,7 +1367,151 @@ Result<void> run(const Configuration& config) {
     return {};
 }
 }
+#ifdef __ANDROID__
+// Android has no console, so a crash leaves nothing behind. This writes everything printed to stdout/stderr, plus a
+// crash report (signal, fault address, call stack) and any uncaught exception, to openlf2.log in the app's files
+// directory; the previous run's log is kept as openlf2.previous.log.
+namespace {
+namespace diagnostics {
+int log_descriptor = -1;
+alignas(16) char alternate_stack[65536];
+
+void put(const char* text) {
+    if (log_descriptor < 0) return;
+    std::size_t length = 0;
+    while (text[length] != '\0') ++length;
+    [[maybe_unused]] const auto written = ::write(log_descriptor, text, length);
+}
+void put_hex(std::uintptr_t value) {
+    char digits[2 + sizeof(value) * 2 + 1];
+    std::size_t at = 0;
+    digits[at++] = '0';
+    digits[at++] = 'x';
+    bool started = false;
+    for (int shift = static_cast<int>(sizeof(value) * 8) - 4; shift >= 0; shift -= 4) {
+        const unsigned nibble = static_cast<unsigned>((value >> shift) & 0xF);
+        if (nibble != 0 || started || shift == 0) {
+            digits[at++] = "0123456789abcdef"[nibble];
+            started = true;
+        }
+    }
+    digits[at] = '\0';
+    put(digits);
+}
+void put_number(int value) {
+    char digits[16];
+    std::size_t at = sizeof(digits) - 1;
+    digits[at] = '\0';
+    do { digits[--at] = static_cast<char>('0' + value % 10); value /= 10; } while (value > 0 && at > 0);
+    put(digits + at);
+}
+void put_location(std::uintptr_t address) {
+    put_hex(address);
+    Dl_info info{};
+    if (dladdr(reinterpret_cast<void*>(address), &info) != 0) {
+        if (info.dli_fname != nullptr) {
+            put(" ");
+            put(info.dli_fname);
+            put("+");
+            put_hex(address - reinterpret_cast<std::uintptr_t>(info.dli_fbase));
+        }
+        if (info.dli_sname != nullptr) {
+            put(" ");
+            put(info.dli_sname);
+        }
+    }
+    put("\n");
+}
+struct Walk { int depth = 0; };
+_Unwind_Reason_Code walk(struct _Unwind_Context* context, void* data) {
+    auto& state = *static_cast<Walk*>(data);
+    const auto address = static_cast<std::uintptr_t>(_Unwind_GetIP(context));
+    if (address == 0) return _URC_END_OF_STACK;
+    put("  #");
+    put_number(state.depth);
+    put(" ");
+    put_location(address);
+    return ++state.depth >= 32 ? _URC_END_OF_STACK : _URC_NO_REASON;
+}
+const char* signal_name(int number) {
+    switch (number) {
+    case SIGSEGV: return "SIGSEGV (invalid memory access)";
+    case SIGABRT: return "SIGABRT (abort / uncaught exception)";
+    case SIGBUS: return "SIGBUS (bad memory alignment or mapping)";
+    case SIGFPE: return "SIGFPE (arithmetic error)";
+    case SIGILL: return "SIGILL (illegal instruction)";
+    default: return "fatal signal";
+    }
+}
+void on_signal(int number, siginfo_t* info, void* context) {
+    put("\n=== OpenLF2 crash: ");
+    put(signal_name(number));
+    put("\nfault address ");
+    put_hex(reinterpret_cast<std::uintptr_t>(info != nullptr ? info->si_addr : nullptr));
+    put("\n");
+#if defined(__aarch64__)
+    if (context != nullptr) {
+        put("crashing instruction ");
+        put_location(static_cast<std::uintptr_t>(static_cast<ucontext_t*>(context)->uc_mcontext.pc));
+    }
+#else
+    (void)context;
+#endif
+    put("call stack:\n");
+    Walk walker;
+    _Unwind_Backtrace(walk, &walker);
+    put("=== end of crash report ===\n");
+    ::signal(number, SIG_DFL);
+    ::raise(number);
+}
+void on_terminate() {
+    put("\n=== OpenLF2: std::terminate (uncaught exception) ===\n");
+    try {
+        if (const auto pending = std::current_exception()) std::rethrow_exception(pending);
+        put("terminate called with no active exception\n");
+    } catch (const std::exception& error) {
+        put("exception: ");
+        put(error.what());
+        put("\n");
+    } catch (...) {
+        put("exception of unknown type\n");
+    }
+    std::abort();
+}
+void install(const std::filesystem::path& fallback_directory) {
+    std::error_code error;
+    std::filesystem::path directory = "/storage/emulated/0/Android/data/io.github.openlf2.openlf2/files";
+    if (!std::filesystem::is_directory(directory, error)) directory = fallback_directory;
+    const auto current = directory / "openlf2.log";
+    std::filesystem::rename(current, directory / "openlf2.previous.log", error);
+    log_descriptor = ::open(current.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0644);
+    if (log_descriptor < 0) return;
+    ::dup2(log_descriptor, STDOUT_FILENO);
+    ::dup2(log_descriptor, STDERR_FILENO);
+    std::cout << std::unitbuf;
+    std::cerr << std::unitbuf;
+    stack_t stack{};
+    stack.ss_sp = alternate_stack;
+    stack.ss_size = sizeof(alternate_stack);
+    ::sigaltstack(&stack, nullptr);
+    struct sigaction action{};
+    action.sa_sigaction = on_signal;
+    action.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
+    sigemptyset(&action.sa_mask);
+    for (const int number : {SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL}) ::sigaction(number, &action, nullptr);
+    std::set_terminate(on_terminate);
+    put("OpenLF2 log started: ");
+    put(current.c_str());
+    put("\n");
+}
+}
+}
+#endif
 int run_application(std::span<const std::string> arguments, const std::filesystem::path& directory) {
+#ifdef __ANDROID__
+    diagnostics::install(directory);
+    std::cerr << "OpenLF2 start, " << arguments.size() << " argument(s), directory " << directory.string() << '\n';
+#endif
     try {
         auto config = configuration(arguments, directory);
         if (!config) { std::cerr << config.error().message << '\n'; return 1; }
