@@ -320,13 +320,13 @@ Result<std::optional<std::filesystem::path>> offer_installer_download(const std:
     const std::array quit{std::string("Quit")};
     auto downloader = make_downloader();
     if (!downloader) {
-        auto shown = dialog.choose("A supported Little Fighter 2 v2.0a installer was not found in\n" + location
+        auto shown = dialog.choose("No Little Fighter 2 v2.0a installer or extracted LF2_v2.0a folder was found in\n" + location
                                            + "\n\nThis build cannot download it: put LF2_v2.0a.exe or lf2_v20a_Setup.exe there and start OpenLF2 again.", quit);
         if (!shown) return std::unexpected(shown.error());
         return std::unexpected(downloader.error());
     }
     const std::array yes_no{std::string("Yes"), std::string("No")};
-    auto answer = dialog.choose("LF2_v2.0a.exe or lf2_v20a_Setup.exe was not found in\n" + location
+    auto answer = dialog.choose("No LF2_v2.0a.exe, lf2_v20a_Setup.exe or extracted LF2_v2.0a folder was found in\n" + location
                                         + "\n\nOpenLF2 needs its game data. Download it from archive.org now ("
                                         + megabytes(installer_size) + " MB)?", yes_no);
     if (!answer) return std::unexpected(answer.error());
@@ -350,26 +350,91 @@ Result<std::optional<std::filesystem::path>> offer_installer_download(const std:
     return fail(ErrorCode::io, "LF2_v2.0a.exe could not be downloaded");
 #endif
 }
-// --installer, else the configuration directory, offering a download if missing (not headless).
-Result<std::optional<std::filesystem::path>> locate_installer(const Configuration& config,
-                                                              std::optional<std::reference_wrapper<SetupDialog>> dialog) {
-    if (!config.installer.empty()) return std::optional{config.installer};
-    std::filesystem::path directory;
+// An extracted (non-installer) LF2 v2.0a folder: `directory/LF2_v2.0a` or `directory` itself, holding lf2.exe in any case.
+std::optional<std::filesystem::path> find_game_folder(const std::filesystem::path& directory) {
+    const auto has_executable = [](const std::filesystem::path& folder) {
+        std::error_code error;
+        if (!std::filesystem::is_directory(folder, error)) return false;
+        std::filesystem::directory_iterator entries(folder, error);
+        if (error) return false;
+        for (const auto& entry : entries) {
+            auto name = entry.path().filename().string();
+            for (auto& character : name) {
+                if (character >= 'A' && character <= 'Z') character = static_cast<char>(character + ('a' - 'A'));
+            }
+            std::error_code file_error;
+            if (name == "lf2.exe" && entry.is_regular_file(file_error)) return true;
+        }
+        return false;
+    };
+    const std::array candidates{directory / "LF2_v2.0a", directory};
+    for (const auto& candidate : candidates) {
+        if (has_executable(candidate)) return candidate;
+    }
+    return std::nullopt;
+}
+// Directories searched for the game data, in order: --config-dir alone, otherwise (Android) the app's
+// external files directory, which the user can fill without root, then the settings directory.
+Result<std::vector<std::filesystem::path>> data_directories(const Configuration& config) {
+    std::vector<std::filesystem::path> directories;
     if (config.config_directory) {
-        directory = *config.config_directory;
-    } else if (config.headless) {
-        return fail(ErrorCode::io, "headless runs need --installer PATH or --config-dir DIR holding LF2_v2.0a.exe or lf2_v20a_Setup.exe");
-    } else {
-        auto settings = settings_directory();
-        if (!settings) return std::unexpected(settings.error());
-        directory = std::move(*settings);
+        directories.push_back(*config.config_directory);
+        return directories;
     }
-    auto found = find_installer(directory);
-    if (!found || *found) return found;
+    if (config.headless) {
+        return fail(ErrorCode::io, "headless runs need --installer PATH or --config-dir DIR holding LF2_v2.0a.exe, lf2_v20a_Setup.exe or an LF2_v2.0a folder");
+    }
+#ifdef __ANDROID__
+    directories.emplace_back("/storage/emulated/0/Android/data/io.github.openlf2.openlf2/files");
+#endif
+    auto settings = settings_directory();
+    if (!settings) return std::unexpected(settings.error());
+    directories.push_back(std::move(*settings));
+    return directories;
+}
+// The opened game data: an installer or an extracted folder, behind one ResourceSource.
+struct GameData {
+    std::unique_ptr<ResourceSource> source;
+    std::size_t file_count = 0;
+};
+// --installer (a file or a folder), else the data directories (an extracted folder first, then an installer),
+// offering a download into the first directory if nothing is found (not headless). Nothing when declined.
+Result<std::optional<GameData>> open_game_data(const Configuration& config,
+                                               std::optional<std::reference_wrapper<SetupDialog>> dialog,
+                                               const Decompressor& decompressor) {
+    const auto from_installer = [&](const std::filesystem::path& path) -> Result<std::optional<GameData>> {
+        auto opened = InstallerArchive::open(path, decompressor);
+        if (!opened) return std::unexpected(opened.error());
+        const auto files = (*opened)->file_count();
+        return std::optional<GameData>{GameData{std::move(*opened), files}};
+    };
+    const auto from_folder = [&](const std::filesystem::path& path) -> Result<std::optional<GameData>> {
+        auto opened = DirectoryArchive::open(path);
+        if (!opened) return std::unexpected(opened.error());
+        const auto files = (*opened)->file_count();
+        return std::optional<GameData>{GameData{std::move(*opened), files}};
+    };
+    if (!config.installer.empty()) {
+        std::error_code error;
+        if (std::filesystem::is_directory(config.installer, error)) return from_folder(config.installer);
+        return from_installer(config.installer);
+    }
+    auto directories = data_directories(config);
+    if (!directories) return std::unexpected(directories.error());
+    for (const auto& directory : *directories) {
+        if (const auto folder = find_game_folder(directory)) return from_folder(*folder);
+        auto found = find_installer(directory);
+        if (!found) return std::unexpected(found.error());
+        if (*found) return from_installer(**found);
+    }
+    const auto& first = directories->front();
     if (!dialog) {
-        return fail(ErrorCode::io, "LF2_v2.0a.exe or lf2_v20a_Setup.exe not found in " + directory.string() + "; put one there or pass --installer PATH");
+        return fail(ErrorCode::io, "LF2_v2.0a.exe, lf2_v20a_Setup.exe or an LF2_v2.0a folder not found in " + first.string() + "; put one there or pass --installer PATH");
     }
-    return offer_installer_download(directory, *dialog);
+    auto downloaded = offer_installer_download(first, *dialog);
+    if (!downloaded) return std::unexpected(downloaded.error());
+    if (!*downloaded) return std::optional<GameData>{};
+    return from_installer(**downloaded);
 }
 Result<Configuration> configuration(std::span<const std::string> arguments,
                                     const std::filesystem::path& directory) {
@@ -457,7 +522,7 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
 }
 class GameResources final : public ResourceSource {
 public:
-    GameResources(const InstallerArchive& archive, Bytes executable, std::span<const PackageAsset> assets)
+    GameResources(const ResourceSource& archive, Bytes executable, std::span<const PackageAsset> assets)
         : archive_(archive), executable_(std::move(executable)) {
         for (const auto& asset : assets) assets_.emplace(asset.resource, asset);
     }
@@ -484,7 +549,7 @@ public:
         return converted;
     }
 private:
-    const InstallerArchive& archive_;
+    const ResourceSource& archive_;
     Bytes executable_;
     std::map<std::string, PackageAsset, std::less<>> assets_;
 };
@@ -827,7 +892,8 @@ Result<void> run(const Configuration& config) {
     // Declared in lifetime order: the window reads resources, which read the archive, which
     // uses the decompressor.
     auto decompressor = make_decompressor();
-    std::unique_ptr<InstallerArchive> archive;
+    std::unique_ptr<ResourceSource> archive;
+    std::size_t archive_files = 0;
     LoadedResources game_data;
     // The user configuration: --config-dir, otherwise SDL's per-user directory; headless runs
     // without --config-dir keep it in memory so traces never touch the user's file. On the web,
@@ -862,15 +928,14 @@ Result<void> run(const Configuration& config) {
                   << (platform->supports(RenderFilter::xbrz) ? " (xBRZ upscaling available)\n" : "\n");
         if (!platform->supports_text()) std::cout << "Translated languages unavailable: this build has no SDL3_ttf\n";
     }
-    auto installer = locate_installer(config, platform ? std::optional{std::ref(platform->setup_dialog())} : std::nullopt);
-    if (!installer) return std::unexpected(installer.error());
-    if (!*installer) {
-        std::cerr << "OpenLF2 needs LF2_v2.0a.exe or lf2_v20a_Setup.exe; stopping.\n";
+    auto game = open_game_data(config, platform ? std::optional{std::ref(platform->setup_dialog())} : std::nullopt, *decompressor);
+    if (!game) return std::unexpected(game.error());
+    if (!*game) {
+        std::cerr << "OpenLF2 needs LF2_v2.0a.exe, lf2_v20a_Setup.exe or an extracted LF2_v2.0a folder; stopping.\n";
         return {};
     }
-    auto opened = InstallerArchive::open(**installer, *decompressor);
-    if (!opened) return std::unexpected(opened.error());
-    archive = std::move(*opened);
+    archive = std::move((*game)->source);
+    archive_files = (*game)->file_count;
     auto executable = archive->read("lf2.exe");
     if (!executable) return std::unexpected(executable.error());
     auto constants = recording_constants(*executable);
@@ -988,7 +1053,7 @@ Result<void> run(const Configuration& config) {
             if (!description) return std::unexpected(description.error());
             std::cout << *description << '\n';
         }
-        std::cout << "Indexed " << archive->file_count() << " files; " << frames.size()
+        std::cout << "Indexed " << archive_files << " files; " << frames.size()
                   << " Lua frame(s), " << loaded_resources.size() << " distinct bitmap resources loaded, "
                   << sound_count << " sound(s) requested from " << played_sounds.size() << " file(s); "
                   << (music_available ? std::to_string(decoded_music.size()) + " music track(s) decoded"
