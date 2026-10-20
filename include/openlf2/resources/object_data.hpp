@@ -8,13 +8,13 @@
 #include "openlf2/ports/resources.hpp"
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace openlf2::object_data {
-inline constexpr std::int32_t frame_count = 400;
 inline constexpr std::size_t max_sheets = 10;
 inline constexpr std::size_t max_frame_blocks = 5;
 inline constexpr std::size_t strength_entries = 10;
@@ -132,7 +132,8 @@ struct ObjectData {
     std::optional<std::string> weapon_hit_sound, weapon_drop_sound, weapon_broken_sound;
     std::vector<SpriteSheet> sheets;
     std::array<WeaponStrength, strength_entries> strengths{};
-    std::vector<Frame> frames = std::vector<Frame>(frame_count);
+    // Sparse by frame number: any non-negative int32 index is accepted (the original stops at 399).
+    std::map<std::int32_t, Frame> frames;
     std::int32_t token_checksum = 0;
     // Recoverable quirks the original accepts silently, with line numbers.
     std::vector<std::string> diagnostics;
