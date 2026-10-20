@@ -1496,7 +1496,7 @@ void install(const std::filesystem::path& fallback_directory) {
     ::sigaltstack(&stack, nullptr);
     struct sigaction action{};
     action.sa_sigaction = on_signal;
-    action.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_RESETHAND;
+    action.sa_flags = static_cast<int>(SA_SIGINFO | SA_ONSTACK | SA_RESETHAND);
     sigemptyset(&action.sa_mask);
     for (const int number : {SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL}) ::sigaction(number, &action, nullptr);
     std::set_terminate(on_terminate);
