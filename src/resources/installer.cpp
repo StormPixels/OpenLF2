@@ -6,6 +6,7 @@
 #include "openlf2/core/files.hpp"
 #include "openlf2/ports/digest.hpp"
 #include <algorithm>
+#include <cstdio>
 #include <optional>
 
 namespace openlf2 {
@@ -327,9 +328,16 @@ Result<Bytes> DirectoryArchive::read(std::string_view path) const {
     auto normalized = virtual_path(path);
     if (!normalized) return std::unexpected(normalized.error());
     const auto file = files_.find(*normalized);
-    if (file == files_.end()) return fail(ErrorCode::io, "folder resource missing: " + *normalized);
+    if (file == files_.end()) {
+        std::fprintf(stderr, "[folder] MISSING %s\n", normalized->c_str());
+        return fail(ErrorCode::io, "folder resource missing: " + *normalized);
+    }
+    std::fprintf(stderr, "[folder] read %s\n", normalized->c_str());
     auto result = read_file(file->second, folder_file_limit);
-    if (!result) result.error().message = *normalized + ": " + result.error().message;
+    if (!result) {
+        std::fprintf(stderr, "[folder] FAILED %s: %s\n", normalized->c_str(), result.error().message.c_str());
+        result.error().message = *normalized + ": " + result.error().message;
+    }
     return result;
 }
 }
