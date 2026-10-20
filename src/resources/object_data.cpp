@@ -37,8 +37,7 @@ public:
                 note("ignored top-level token `" + token_ + "`");
             }
         }
-        for (std::int32_t index = 0; index < frame_count; ++index) {
-            const auto& frame = data_.frames[static_cast<std::size_t>(index)];
+        for (const auto& [index, frame] : data_.frames) {
             if (frame.defined && !find_picture(data_, frame.picture)) {
                 note("frame " + std::to_string(index) + " picture " +
                      std::to_string(frame.picture) + " is outside every sprite sheet");
@@ -330,10 +329,10 @@ private:
         if (stream_.integer(index) != TokenStream::Scan::value) {
             throw ParseFailure{ErrorCode::unsupported, "<frame> without a frame number"};
         }
-        if (index < 0 || index >= frame_count) {
-            throw ParseFailure{ErrorCode::unsupported, "frame number outside 0-399: " + std::to_string(index)};
+        if (index < 0) {
+            throw ParseFailure{ErrorCode::unsupported, "negative frame number: " + std::to_string(index)};
         }
-        auto& frame = data_.frames[static_cast<std::size_t>(index)];
+        auto& frame = data_.frames[index];
         if (frame.defined) note("frame " + std::to_string(index) + " redefined; earlier fields kept");
         frame.name = read_word(section, 20);
         frame.defined = true;
@@ -573,10 +572,8 @@ ScriptValue to_script_value(const ObjectData& data) {
     }
 
     ScriptTable frames;
-    for (std::size_t index = 0; index < data.frames.size(); ++index) {
-        if (data.frames[index].defined) {
-            set_field(frames, static_cast<std::int32_t>(index), frame_value(data.frames[index]));
-        }
+    for (const auto& [index, frame] : data.frames) {
+        if (frame.defined) set_field(frames, index, frame_value(frame));
     }
 
     ScriptTable diagnostics;
