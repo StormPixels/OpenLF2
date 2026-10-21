@@ -159,7 +159,7 @@ return {
         height = 550,
     },
     -- A character, weapon or effect has fewer frames than this.
-    frame_limit = 400,
+    frame_limit = 999,
     -- Frame dvx/dvy/dvz above the threshold encode an absolute velocity as value - offset.
     velocity_encoding = {
         absolute_threshold = 500,
