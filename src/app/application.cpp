@@ -26,6 +26,7 @@
 #include "openlf2/resources/stage_data.hpp"
 #include "openlf2/resources/bitmap.hpp"
 #include "openlf2/resources/installer.hpp"
+#include "openlf2/resources/resource_names.hpp"
 #include "openlf2/resources/object_data.hpp"
 #include <algorithm>
 #include <array>
@@ -372,6 +373,8 @@ std::optional<std::filesystem::path> find_game_folder(const std::filesystem::pat
             }
             std::error_code file_error;
             if (name == "lf2.exe" && entry.is_regular_file(file_error)) return true;
+            // No lf2.exe: LF2 Darkfiren plus the lf2_exe/ folder written by tools/extract_lf2_exe.py.
+            if (name == "lf2_exe" && entry.is_directory(file_error)) return true;
         }
         return false;
     };
@@ -533,6 +536,7 @@ public:
     GameResources(const ResourceSource& archive, Bytes executable, std::span<const PackageAsset> assets)
         : archive_(archive), executable_(std::move(executable)) {
         for (const auto& asset : assets) assets_.emplace(asset.resource, asset);
+        names_ = load_resource_names(archive_);
     }
     Result<Bytes> read(std::string_view path) const override {
         auto normalized = virtual_path(path);
@@ -547,6 +551,13 @@ public:
             for (auto& character : name) {
                 if (character >= 'a' && character <= 'z') character = static_cast<char>(character - ('a' - 'A'));
             }
+            // Darkfiren (resource.dat and its moved bitmaps) and lf2_exe/ first, the executable last.
+            for (const auto& candidate : bitmap_candidates(name, names_)) {
+                if (auto bytes = read(candidate)) return bytes;
+            }
+            if (executable_.empty()) {
+                return fail(ErrorCode::io, "bitmap resource pe/" + name + " is in none of resource.dat, lf2_exe/ or lf2.exe");
+            }
             return bitmap_resource(executable_, name);
         }
         auto bytes = archive_.read(*normalized);
@@ -559,6 +570,7 @@ public:
 private:
     const ResourceSource& archive_;
     Bytes executable_;
+    ResourceNames names_;
     std::map<std::string, PackageAsset, std::less<>> assets_;
 };
 // The game data once the installer is loaded; reads fail before that, while the window
@@ -695,7 +707,12 @@ private:
 // lf2.exe's recording key digits and version (initialized data, read at startup).
 Result<std::pair<std::string, std::int32_t>> recording_constants(std::span<const char> executable) {
     auto key = executable_data(executable, recording::key_address, recording::key_capacity);
-    if (!key) return std::unexpected(key.error());
+    const auto digits_only = [](const Bytes& bytes) {
+        const auto end = std::find(bytes.begin(), bytes.end(), '\0');
+        return end - bytes.begin() >= 1000 && std::all_of(bytes.begin(), end, [](char c) { return c >= '0' && c <= '9'; });
+    };
+    // Other layouts (LF2 Darkfiren) hold the key elsewhere; the key is then the one long digit run.
+    if (!key || !digits_only(*key)) return scan_recording_constants(executable);
     auto version = executable_data(executable, recording::version_address, 4);
     if (!version) return std::unexpected(version.error());
     std::string digits(key->begin(), std::find(key->begin(), key->end(), '\0'));
@@ -944,11 +961,19 @@ Result<void> run(const Configuration& config) {
     }
     archive = std::move((*game)->source);
     archive_files = (*game)->file_count;
-    auto executable = archive->read("lf2.exe");
-    if (!executable) return std::unexpected(executable.error());
-    auto constants = recording_constants(*executable);
+    // lf2.exe is optional (LF2 Darkfiren has none): bitmaps then come from resource.dat and lf2_exe/,
+    // the recording key and version from lf2_exe/recording.txt.
+    Bytes executable;
+    Result<std::pair<std::string, std::int32_t>> constants = fail(ErrorCode::io, "no lf2.exe and no lf2_exe/recording.txt in the game data");
+    if (auto exe = archive->read("lf2.exe")) {
+        executable = std::move(*exe);
+        constants = recording_constants(executable);
+    }
+    if (!constants) {
+        if (auto file = read_recording_file(*archive)) constants = std::move(file);
+    }
     if (!constants) return std::unexpected(constants.error());
-    const auto& resources = game_data.attach(std::make_unique<GameResources>(*archive, std::move(*executable), scripts->assets));
+    const auto& resources = game_data.attach(std::make_unique<GameResources>(*archive, std::move(executable), scripts->assets));
     auto bootstrap = read_file(config.scripts / "runtime/bootstrap.lua", 1024 * 1024);
     if (!bootstrap) return std::unexpected(bootstrap.error());
     const auto menu_seed = config.seed.value_or(static_cast<std::uint32_t>(
