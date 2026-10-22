@@ -34,6 +34,18 @@ public:
         const std::size_t size = entry.u32(4);
         return file_.slice(file_offset(entry.u32(0), size), size);
     }
+    // The virtual address of a file offset inside a section, if any.
+    std::optional<std::uint32_t> address_of(std::size_t offset) const {
+        for (std::size_t index = 0; index < section_count_; ++index) {
+            const auto section = sections_ + index * 40;
+            const std::size_t raw = file_.u32(section + 20);
+            const std::size_t raw_size = file_.u32(section + 16);
+            if (offset >= raw && offset - raw < raw_size) {
+                return static_cast<std::uint32_t>(image_base_ + file_.u32(section + 12) + (offset - raw));
+            }
+        }
+        return std::nullopt;
+    }
     // Initialized data at a virtual address (backed by the file, not zero-filled BSS).
     std::span<const char> data(std::uint32_t address, std::size_t size) const {
         if (address < image_base_) throw FormatError("address below the image base");
@@ -109,6 +121,28 @@ Result<Bytes> executable_data(std::span<const char> executable, std::uint32_t ad
     } catch (const FormatError& error) {
         return fail(ErrorCode::format, error.what());
     }
+}
+Result<std::pair<std::string, std::int32_t>> scan_recording_constants(std::span<const char> executable) {
+    if (executable.size() > 64 * 1024 * 1024) return fail(ErrorCode::limit, "PE file exceeds limit");
+    constexpr std::size_t minimum_run = 1000;
+    constexpr std::size_t version_distance = 0x764;  // 0x44d7a0 - 0x44d03c in v2.0a, the same in Darkfiren
+    std::size_t found_start = 0, found_size = 0;
+    int runs = 0;
+    for (std::size_t index = 0; index < executable.size();) {
+        std::size_t end = index;
+        while (end < executable.size() && executable[end] >= '0' && executable[end] <= '9') ++end;
+        if (end - index >= minimum_run) { ++runs; found_start = index; found_size = end - index; }
+        index = end + 1;
+    }
+    if (runs != 1) return fail(ErrorCode::format, "expected one recording key in the executable, found " + std::to_string(runs));
+    if (found_start < version_distance) return fail(ErrorCode::format, "recording key too close to the file start");
+    try {
+        const PeResources pe(executable);
+        if (!pe.address_of(found_start)) return fail(ErrorCode::format, "recording key is outside the PE sections");
+    } catch (const FormatError& error) { return fail(ErrorCode::format, error.what()); }
+    const BinaryView view(executable);
+    return std::pair{std::string(executable.data() + found_start, found_size),
+                     static_cast<std::int32_t>(view.u32(found_start - version_distance))};
 }
 Result<Bytes> bitmap_resource(std::span<const char> executable, std::string_view name) {
     if (executable.size() > 64 * 1024 * 1024) return fail(ErrorCode::limit, "PE file exceeds limit");

@@ -287,14 +287,17 @@ constexpr std::size_t folder_file_limit = 64 * 1024 * 1024;
 
 // The folder's lf2.exe is no longer required to be the original LF2 v2.0a: its size and SHA-256 are only logged.
 Result<void> identify_folder(const ResourceSource& source) {
-    auto exe = source.read("lf2.exe");
-    if (!exe) return std::unexpected(exe.error());
-    const bool same_size = exe->size() == folder_exe_size;
-    auto digest = sha256(*exe);
-    const bool same_digest = digest && *digest == folder_exe_sha256;
-    std::fprintf(stderr, "[folder] lf2.exe is %zu bytes (LF2 v2.0a: %s), SHA-256 %s; size and hash are not enforced\n",
-        static_cast<std::size_t>(exe->size()), same_size ? "same size" : "different size",
-        same_digest ? "matches LF2 v2.0a" : "differs from LF2 v2.0a");
+    // lf2.exe is optional: LF2 Darkfiren keeps its bitmaps as files, and lf2_exe/ (tools/extract_lf2_exe.py) holds the rest.
+    if (auto exe = source.read("lf2.exe")) {
+        const bool same_size = exe->size() == folder_exe_size;
+        auto digest = sha256(*exe);
+        const bool same_digest = digest && *digest == folder_exe_sha256;
+        std::fprintf(stderr, "[folder] lf2.exe is %zu bytes (LF2 v2.0a: %s), SHA-256 %s; size and hash are not enforced\n",
+            static_cast<std::size_t>(exe->size()), same_size ? "same size" : "different size",
+            same_digest ? "matches LF2 v2.0a" : "differs from LF2 v2.0a");
+    } else {
+        std::fprintf(stderr, "[folder] no lf2.exe; bitmaps come from resource.dat and lf2_exe/\n");
+    }
     if (auto data = source.read("data/data.txt"); !data) return std::unexpected(data.error());
     return {};
 }
