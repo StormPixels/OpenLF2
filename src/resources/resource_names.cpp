@@ -70,6 +70,27 @@ std::vector<std::string> bitmap_candidates(std::string_view name, const Resource
     return paths;
 }
 
+std::optional<int> system_number(const ResourceSource& resources, std::string_view key) {
+    auto text = read_data_text(resources, "data/system.dat", 1024 * 1024);
+    if (!text) return std::nullopt;
+    const std::string_view all(text->data(), text->size());
+    for (std::size_t start = 0; start < all.size();) {
+        auto end = all.find('\n', start);
+        if (end == std::string_view::npos) end = all.size();
+        auto line = trim(all.substr(start, end - start));
+        start = end + 1;
+        if (!line.starts_with(key)) continue;
+        line = trim(line.substr(key.size()));
+        if (line.empty() || line.front() != ':') continue;
+        line = trim(line.substr(1));
+        int value = 0;
+        std::size_t used = 0;
+        while (used < line.size() && line[used] >= '0' && line[used] <= '9' && used < 6) value = value * 10 + (line[used++] - '0');
+        if (used > 0) return value;
+    }
+    return std::nullopt;
+}
+
 Result<std::pair<std::string, std::int32_t>> read_recording_file(const ResourceSource& resources) {
     auto bytes = resources.read("lf2_exe/recording.txt");
     if (!bytes) return std::unexpected(bytes.error());

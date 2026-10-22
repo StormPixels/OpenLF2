@@ -5,6 +5,7 @@
 #include "openlf2/ports/resources.hpp"
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -20,6 +21,8 @@ ResourceNames load_resource_names(const ResourceSource& resources);
 // the resource.dat entry, where Darkfiren keeps the bitmaps resource.dat does not list, then the
 // `lf2_exe/` folder written by tools/extract_lf2_exe.py. The executable itself is the caller's last resort.
 std::vector<std::string> bitmap_candidates(std::string_view name, const ResourceNames& names);
+// A numeric scalar of `data/system.dat` such as `spark_w: 99` (LF2 Darkfiren), if present.
+std::optional<int> system_number(const ResourceSource& resources, std::string_view key);
 // The recording version and key digits of `lf2_exe/recording.txt` (line 1: version, line 2: digits).
 Result<std::pair<std::string, std::int32_t>> read_recording_file(const ResourceSource& resources);
 }

@@ -27,17 +27,55 @@ function screen.create(options)
     return state
 end
 
+local spark_frames = {}
+for frame = 1, 4 do
+    spark_frames[frame] = {0x66 * frame, 0, 0x66, 0x50}
+    spark_frames[frame + 10] = {0x66 * frame, 0x80, 0x66, 0x50}
+    spark_frames[frame + 5] = {0x3d * frame, 0x50, 0x3d, 0x30}
+    spark_frames[frame + 15] = {0x3d * frame, 0xd0, 0x3d, 0x30}
+end
+
+-- LF2 Darkfiren stores hit sparks in a regular grid: one block is spark_w x spark_h (system.dat) followed by a
+-- one pixel separator, five blocks per row, frames numbered row by row. "game/spark_block" holds "w h", or nothing
+-- for the original's irregular sheet.
+local spark_block, spark_block_read
+local function spark_block_size()
+    if not spark_block_read then
+        spark_block_read = true
+        local ok, text = pcall(engine.read_resource, "game/spark_block")
+        local width, height = (ok and text or ""):match("^(%d+)%s+(%d+)")
+        if width then spark_block = {tonumber(width), tonumber(height)} end
+    end
+    return spark_block
+end
+
+local function spark_source(frame)
+    local block = spark_block_size()
+    if not block then return spark_frames[frame] end
+    local column, row = frame % 5, math.floor(frame / 5)
+    -- Like the original, column 0 is never drawn.
+    if column == 0 then return nil end
+    return {column * (block[1] + 1), row * (block[2] + 1), block[1], block[2]}
+end
+
 local function advance_sparks(list, drawn)
     local count = 0
+    local block = spark_block_size()
+    -- Sparks are centred on their block: half of 102x80 and 61x48 in the original sheet.
+    local big_left, big_up, small_left, small_up = 0x33, 0x28, 0x1e, 0x18
+    if block then
+        big_left, big_up = math.floor(block[1] / 2), math.floor(block[2] / 2)
+        small_left, small_up = big_left, big_up
+    end
     local position = 1
     while position <= #list do
         local spark = list[position]
         local timer = spark.timer
         local frame, left, up
-        if timer < 5 then frame, left, up = timer, 0x33, 0x28
-        elseif timer >= 10 and timer < 15 then frame, left, up = timer - 5, 0x1e, 0x18
-        elseif timer >= 20 and timer < 29 then frame, left, up = math.floor((timer - 20) / 2) + 10, 0x33, 0x28
-        elseif timer >= 30 and timer < 39 then frame, left, up = math.floor((timer - 30) / 2) + 15, 0x1e, 0x18 end
+        if timer < 5 then frame, left, up = timer, big_left, big_up
+        elseif timer >= 10 and timer < 15 then frame, left, up = timer - 5, small_left, small_up
+        elseif timer >= 20 and timer < 29 then frame, left, up = math.floor((timer - 20) / 2) + 10, big_left, big_up
+        elseif timer >= 30 and timer < 39 then frame, left, up = math.floor((timer - 30) / 2) + 15, small_left, small_up end
         if frame then
             count = count + 1
             local entry = drawn[count] or {}
@@ -191,14 +229,6 @@ local function colorref(value)
     return value % 256 * 65536 + math.floor(value / 256) % 256 * 256 + math.floor(value / 65536)
 end
 
-local spark_frames = {}
-for frame = 1, 4 do
-    spark_frames[frame] = {0x66 * frame, 0, 0x66, 0x50}
-    spark_frames[frame + 10] = {0x66 * frame, 0x80, 0x66, 0x50}
-    spark_frames[frame + 5] = {0x3d * frame, 0x50, 0x3d, 0x30}
-    spark_frames[frame + 15] = {0x3d * frame, 0xd0, 0x3d, 0x30}
-end
-
 local function draw_item(context, stage, view, entry, bounds, lighting)
     local frame = entry.record.frame(entry.frame)
     local blink = math.abs(entry.blink)
@@ -275,7 +305,7 @@ local function draw_item(context, stage, view, entry, bounds, lighting)
         glyphs(context, sheet, label, x, entry.z + 3, 9)
     end
     for _, spark in ipairs(entry.sparks) do
-        local source = spark_frames[spark.frame]
+        local source = spark_source(spark.frame)
         -- Frames 0, 5, 10 and 15 are never given a rectangle (assumed empty; see docs).
         if source then context.sprite("pe/spark", source, entry.draw_offset + spark.x - camera, spark.y, true) end
     end

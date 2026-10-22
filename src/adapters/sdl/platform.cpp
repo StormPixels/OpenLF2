@@ -917,9 +917,19 @@ private:
                 region.width = texture->w;
                 region.height = texture->h;
             }
-            if (region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0 ||
-                region.x + region.width > texture->w || region.y + region.height > texture->h) {
+            if (region.x < 0 || region.y < 0 || region.width <= 0 || region.height <= 0) {
                 return fail(ErrorCode::format, "sprite rectangle outside texture: " + sprite.resource);
+            }
+            // A mod's image may be smaller than the original's (LF2 Darkfiren trims some sheets): draw the part
+            // the image has, and say so once, instead of stopping the game.
+            if (region.x + region.width > texture->w || region.y + region.height > texture->h) {
+                if (reported_.insert("clipped " + sprite.resource).second) {
+                    std::cerr << "Sprite: " << sprite.resource << " is smaller than the rectangle drawn from it ("
+                              << texture->w << 'x' << texture->h << "); drawing the part it has\n";
+                }
+                if (region.x >= texture->w || region.y >= texture->h) continue;
+                region.width = std::min(region.width, texture->w - region.x);
+                region.height = std::min(region.height, texture->h - region.y);
             }
             const SDL_FRect source{static_cast<float>(region.x), static_cast<float>(region.y),
                                    static_cast<float>(region.width), static_cast<float>(region.height)};

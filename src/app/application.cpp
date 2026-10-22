@@ -546,6 +546,15 @@ public:
             if (!file) return std::unexpected(file.error());
             return read_file(*file, 16 * 1024 * 1024);
         }
+        if (*normalized == "game/spark_block") {
+            // LF2 Darkfiren: one spark block is spark_w x spark_h (system.dat) plus a one pixel separator.
+            // Empty text means the original's sheet layout.
+            const auto width = system_number(archive_, "spark_w");
+            const auto height = system_number(archive_, "spark_h");
+            const std::string text = width && height && *width > 0 && *height > 0
+                ? std::to_string(*width) + " " + std::to_string(*height) : std::string();
+            return Bytes(text.begin(), text.end());
+        }
         if (normalized->starts_with("pe/")) {
             auto name = normalized->substr(3);
             for (auto& character : name) {
