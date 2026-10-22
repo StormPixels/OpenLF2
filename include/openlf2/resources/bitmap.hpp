@@ -5,10 +5,10 @@
 #include "openlf2/core/result.hpp"
 #include <span>
 
-// Original bitmaps are BI_RLE8.
+// Original bitmaps are BI_RLE8; LF2 Darkfiren also ships a few BI_RLE4 ones.
 namespace openlf2::bitmap {
 // A BITMAPINFOHEADER DIB whose pixels follow its palette (PE resource layout) to a BMP file
-// with uncompressed pixels. Accepts uncompressed 1/4/8/24/32-bit and 8-bit RLE8 input.
+// with uncompressed pixels. Accepts uncompressed 1/4/8/24/32-bit, 8-bit RLE8 and 4-bit RLE4 input.
 Result<Bytes> from_dib(std::span<const char> dib);
 // A BMP file with the same support to a BMP file with uncompressed pixels.
 Result<Bytes> from_file(std::span<const char> file);

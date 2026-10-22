@@ -72,6 +72,9 @@ private:
     std::map<std::string, std::filesystem::path, std::less<>> files_;
 };
 Result<Bytes> bitmap_resource(std::span<const char> executable, std::string_view name);
+// The recording key digits and version of any LF2 executable whose layout differs from v2.0a (LF2 Darkfiren):
+// the one run of 1000+ ASCII digits in the file is the key, and the version is the u32 0x764 bytes before it.
+Result<std::pair<std::string, std::int32_t>> scan_recording_constants(std::span<const char> executable);
 // Initialized data of a PE32 executable at a virtual address (e.g. the original game's recording key).
 Result<Bytes> executable_data(std::span<const char> executable, std::uint32_t address, std::size_t size);
 }
