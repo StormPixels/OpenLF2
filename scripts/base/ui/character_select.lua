@@ -12,12 +12,26 @@ local i18n = require("base/i18n/i18n")
 local sounds = require("base/game/sounds")
 local controls = require("base/ui/controls")
 local music = require("base/game/music")
+local user_options = require("base/game/options")
 local selection = {}
 local idle_countdown = 150
 local computer_phase, computer_team_phase, computer_done = slot_phases.computer_fighter, slot_phases.computer_team, slot_phases.computer_ready
 
+-- LF2 Darkfiren's 8P super widescreen (mode4.dat): the eight slots stand in one row on CHARMENU3 (start_x 10,
+-- 30 left of the classic 40) and every offset inside a slot stays as in the classic two rows of four.
+local per_row, shift = 4, 0
 local function origin(slot)
-    return (slot % 4) * 153, math.floor(slot / 4) * 212
+    return (slot % per_row) * 153 + shift, math.floor(slot / per_row) * 212
+end
+local wide_picture, wide_known = "sprite/ui/charmenu3.bmp"
+-- The wide menu needs the wide battlefield layout and a game that has the picture (LF2 Darkfiren).
+local function wide_wanted()
+    if user_options.current().battlefield_layout ~= user_options.wide_layout then return false end
+    if wide_known == nil then wide_known = pcall(engine.read_resource, wide_picture) end
+    return wide_known
+end
+local function use_layout(state)
+    if state.wide then per_row, shift = 8, -30 else per_row, shift = 4, 0 end
 end
 local function pressed(keys, key) return keys:find(key, 1, true) ~= nil end
 local function image(state, path, x, y) state.display[#state.display + 1] = {"image", path, x, y} end
@@ -63,7 +77,7 @@ function selection.create(options)
     return {mode = mode, fighters = catalog.load(), backgrounds = catalog.backgrounds(),
         slots = slots, menu = menus.human_slots, last_menu = menus.human_slots, options = options,
         countdown = idle_countdown, computers = previous.computers or -100,
-        order = {}, cursor = 0, previous_random = false, blink = 0, display = {}}
+        order = {}, cursor = 0, previous_random = false, blink = 0, display = {}, wide = wide_wanted()}
 end
 
 local function pick_fighter(state)
@@ -642,15 +656,87 @@ function selection.match_options(state)
         fighters = state.fighters, backgrounds = state.backgrounds, slots = slots}
 end
 
+-- The roster of the wide menu (mode4.dat's <grid_char>): every selectable fighter as a 40x45 face, 21 to a row from
+-- (45, 320) every 60 by 66 pixels, under a panel at (22, 294). A tap on a face gives it to the first slot that is
+-- choosing a fighter; a fighter a slot has chosen is framed and labelled with who has it.
+local roster = {x = 45, y = 320, columns = 21, step_x = 60, step_y = 66, width = 40, height = 45, label = 46}
+local function roster_cell(position)
+    return roster.x + (position % roster.columns) * roster.step_x,
+        roster.y + math.floor(position / roster.columns) * roster.step_y
+end
+local function roster_fighters(state)
+    local cells = {0}
+    for index, fighter in ipairs(state.fighters) do
+        if catalog.selectable(fighter) then cells[#cells + 1] = index end
+    end
+    return cells
+end
+local function roster_panel(state)
+    image(state, "sprite/ui/grid/box_char2.bmp", 22, 294)
+end
+local function roster_pass(state, held)
+    local cells = roster_fighters(state)
+    -- A tap picks for the first slot that is choosing a fighter.
+    if held and held.click and held.pointer_x and held.pointer_x >= 0 and held.pointer_y and held.pointer_y >= 0 then
+        for position, fighter_index in ipairs(cells) do
+            local x, y = roster_cell(position - 1)
+            if held.pointer_x >= x and held.pointer_x < x + roster.step_x - 10
+               and held.pointer_y >= y and held.pointer_y < y + roster.height + 16 then
+                for index = 0, 7 do
+                    local slot = state.slots[index]
+                    if slot.phase == slot_phases.choosing_fighter then
+                        slot.fighter = fighter_index
+                        sounds.direct(state, "ok")
+                        break
+                    end
+                end
+                break
+            end
+        end
+    end
+    local owners = {}
+    for index = 0, 7 do
+        local slot = state.slots[index]
+        if slot.phase >= slot_phases.choosing_fighter then
+            local computer = slot.phase >= computer_phase
+            owners[slot.fighter] = {label = computer and "COM" or ("P" .. (index + 1)),
+                color = computer and computer_red or white, gray = computer and 160 or 255}
+        end
+    end
+    for position, fighter_index in ipairs(cells) do
+        local x, y = roster_cell(position - 1)
+        local fighter = state.fighters[fighter_index]
+        local face = fighter and fighter.small or "sprite/ui/grid/rface_small.bmp"
+        image(state, face, x, y)
+        local owner = owners[fighter_index]
+        if owner then
+            fill(state, x - 1, y - 1, roster.width + 2, 1, owner.gray)
+            fill(state, x - 1, y + roster.height, roster.width + 2, 1, owner.gray)
+            fill(state, x - 1, y - 1, 1, roster.height + 2, owner.gray)
+            fill(state, x + roster.width, y - 1, 1, roster.height + 2, owner.gray)
+            text(state, owner.label, x + 12, y + roster.label, owner.color)
+        else
+            text(state, fighter and fighter.name or "Random", x, y + roster.label, option_blue)
+        end
+    end
+end
+
 function selection.update(state, held, context)
     state.display = {}
     state.held = held
     state.leave = false
     state.blink = (state.blink + 1) % 30
     local previous_menu = state.menu
-    fill(state, 0, 0, constants.screen.width, constants.screen.height, 0)
-    image(state, "pe/charmenu", 40, 33)
+    use_layout(state)
+    fill(state, 0, 0, state.wide and constants.screen.wide_width or constants.screen.width, constants.screen.height, 0)
+    if state.wide then
+        roster_panel(state)
+        image(state, wide_picture, 10, 33)
+    else
+        image(state, "pe/charmenu", 40, 33)
+    end
     slots_pass(state, held)
+    if state.wide then roster_pass(state, held) end
     state.last_menu = state.menu
     if state.menu == menus.computer_count then computer_count_menu(state, previous_menu) end
     if state.menu == menus.computer_slots or state.menu == menus.options then computer_menu(state, previous_menu) end
@@ -665,7 +751,7 @@ function selection.update(state, held, context)
 end
 
 function selection.draw(state, context)
-    context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0)
+    context.viewport(state.wide and constants.screen.wide_width or constants.screen.width, constants.screen.height, 0, 0, 0)
     for _, command in ipairs(state.display) do
         if command[1] == "image" then context.image(command[2], command[3], command[4], false)
         elseif command[1] == "sprite" then
