@@ -157,6 +157,9 @@ return {
     screen = {
         width = 794,
         height = 550,
+        -- LF2 Darkfiren's super widescreen mode (mode4.dat, `respond: 1333` in mode.dat): the width of the
+        -- picture a match is drawn on when the battlefield layout is options.wide_layout.
+        wide_width = 1333,
     },
     -- A character, weapon or effect has fewer frames than this.
     frame_limit = 999,
