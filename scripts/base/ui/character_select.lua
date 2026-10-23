@@ -153,9 +153,9 @@ end
 
 local function empty_slot(state, index, slot, keys, col, row, all_empty)
     if state.countdown == idle_countdown then
-        image(state, state.blink % 5 < 3 and "pe/cma" or "pe/cma2", col + 147, row + 120)
+        image(state, state.blink % 5 < 3 and "pe/cma" or "pe/cma2", col + 147, row + 94)
     elseif state.countdown >= 0 then
-        image(state, "pe/cm" .. (math.floor(state.countdown / 30) + 1), col + 181, row + 125)
+        image(state, "pe/cm" .. (math.floor(state.countdown / 30) + 1), col + 147, row + 94)
     end
     if pressed(keys, "c") then
         if trigger(slot, state.last_menu == menus.human_slots) then
