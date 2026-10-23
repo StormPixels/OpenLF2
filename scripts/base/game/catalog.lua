@@ -39,9 +39,12 @@ function catalog.load()
                 local header = assert(data:match("<bmp_begin>(.-)<bmp_end>"), "missing character header: " .. path)
                 local name = assert(header:match("name:%s*(%S+)"), "missing character name: " .. path)
                 local portrait = assert(header:match("head:%s*(%S+)"), "missing portrait: " .. path)
+                -- The small picture of the HP frame, also the face on the wide layout's roster (optional).
+                local small = header:match("small:%s*(%S+)")
                 local family = math.floor(id / 10)
                 fighters[#fighters + 1] = {id = id, record = record, name = name,
-                    portrait = canonical(portrait), path = path, hidden = family == 3 or family == 5}
+                    portrait = canonical(portrait), small = small and canonical(small) or nil, path = path,
+                    hidden = family == 3 or family == 5}
                 assert(#fighters <= 400, "too many character records")
             end
         elseif line:find("%S") and not id then error("invalid object catalog line") end
