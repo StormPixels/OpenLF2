@@ -446,7 +446,19 @@ function screen.outcome(state)
 end
 
 function screen.draw(state, context, window_bounds)
-    context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0)
+    local view_width = constants.screen.width
+    if options.current().battlefield_layout == options.wide_layout then
+        -- LF2 Darkfiren's super widescreen: the picture is 1333 wide whatever the window; a window that is
+        -- even wider shows more of the stage, and a narrower one is letterboxed by the platform. The simulation
+        -- keeps its classic 794 wide view; the expanded battlefield below shows the rest.
+        view_width = constants.screen.wide_width
+        window_bounds = {
+            left = math.min(window_bounds and window_bounds.left or 0, 0),
+            top = math.min(window_bounds and window_bounds.top or 0, 0),
+            right = math.max(window_bounds and window_bounds.right or 0, view_width),
+            bottom = math.max(window_bounds and window_bounds.bottom or 0, constants.screen.height)}
+    end
+    context.viewport(view_width, constants.screen.height, 0, 0, 0)
     local view = state.view
     local current = state.match
     if not view then return end
