@@ -16,6 +16,9 @@ local network = require("base/game/network")
 local unlock = require("base/game/unlock")
 local control = require("base/game/control")
 local user_options = require("base/game/options")
+-- Layouts that draw the match on a window wider than the classic picture: "expand" follows the window,
+-- the wide layout is a fixed 1333 wide picture.
+local function wider_layout(layout) return layout == "expand" or layout == user_options.wide_layout end
 local touch_gamepad = require("base/ui/touch_gamepad")
 local quit_dialog = require("base/ui/quit_dialog")
 local flow = {}
@@ -282,7 +285,7 @@ function flow.draw(state, context)
     -- Fullscreen (OpenLF2 extension): no-op without a real window; reasserted every frame
     -- like the filter above.
     context.fullscreen(shown_options.fullscreen)
-    if state.active == "match" and shown_options.battlefield_layout == "expand" then
+    if state.active == "match" and wider_layout(shown_options.battlefield_layout) then
         screen_module(state.active).draw(screen_state(state), context, state.window_bounds)
     else
         screen_module(state.active).draw(screen_state(state), context)
@@ -336,7 +339,7 @@ function flow.update(state, raw, context)
     end
     local shown_options = user_options.current()
     -- Local presentation data stays outside network and replay inputs.
-    if shown_options.battlefield_layout == "expand" then
+    if wider_layout(shown_options.battlefield_layout) then
         state.window_bounds = input.screen or state.window_bounds
     else
         state.window_bounds = nil
