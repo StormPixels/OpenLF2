@@ -7,7 +7,16 @@ local unlock = require("base/game/unlock")
 local i18n = require("base/i18n/i18n")
 local options = {}
 
-options.battlefield_layouts = {"classic", "expand"}
+-- "wide 1333" is the expanded battlefield on a fixed 1333 wide picture (LF2 Darkfiren's 8P super widescreen),
+-- where "expand" takes the window's own shape.
+options.wide_layout = "wide 1333"
+options.battlefield_layouts = {"classic", "expand", options.wide_layout}
+local function valid_layout(value)
+    for _, layout in ipairs(options.battlefield_layouts) do
+        if value == layout then return true end
+    end
+    return false
+end
 
 -- Every valid value, in the dropdown's order. "xbrz" is a shader: the host offers it only on
 -- renderers that can run it (see options.available_filters), but a saved choice stays valid.
@@ -85,7 +94,7 @@ local function angle(value, default, low, high)
     return math.max(low, math.min(high, value))
 end
 local function copy(values)
-    return {battlefield_layout = values.battlefield_layout == "expand" and "expand" or defaults.battlefield_layout,
+    return {battlefield_layout = valid_layout(values.battlefield_layout) and values.battlefield_layout or defaults.battlefield_layout,
         gamepad = copy_gamepad(values.gamepad),unlock_characters = values.unlock_characters,
         upscaling_filter = valid_filter(values.upscaling_filter) and values.upscaling_filter or defaults.upscaling_filter,
         fullscreen = values.fullscreen, digipad = values.digipad, show_fps = values.show_fps, rumble = values.rumble,
@@ -140,7 +149,7 @@ function options.load()
         values.language = saved.language
     end
     if type(saved) == "table" then values.gamepad = copy_gamepad(saved.gamepad) end
-    if type(saved) == "table" and (saved.battlefield_layout == "classic" or saved.battlefield_layout == "expand") then
+    if type(saved) == "table" and valid_layout(saved.battlefield_layout) then
         values.battlefield_layout = saved.battlefield_layout
     end
     current = values
