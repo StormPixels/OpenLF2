@@ -60,6 +60,14 @@ local function fill(state, x, y, width, height, gray)
     state.display[#state.display + 1] = {"fill", x, y, width, height, gray}
 end
 
+-- LF2 Darkfiren's <random> of mode4.dat: the ids a random pick may give. Without it (and in the other menus) the
+-- original's rule holds: the fighters before the enemies.
+local function load_random_pool()
+    local ok, text = pcall(engine.read_resource, "game/random_pool")
+    local pool, count = {}, 0
+    for id in (ok and text or ""):gmatch("%d+") do pool[tonumber(id)] = true; count = count + 1 end
+    return count > 0 and pool or nil
+end
 function selection.create(options)
     local previous = options.previous or {}
     local mode = assert(constants.modes[options.mode], "unknown character menu mode")
@@ -74,23 +82,33 @@ function selection.create(options)
     -- Option values are globals in the original and keep their values between visits.
     local options = previous.options or {row = option_rows.reroll, background = constants.background_rows.random, random_background = true,
         difficulty = 0, music = 0, stage_level = 0}
-    return {mode = mode, fighters = catalog.load(), backgrounds = catalog.backgrounds(),
+    local state = {mode = mode, fighters = catalog.load(), backgrounds = catalog.backgrounds(),
         slots = slots, menu = menus.human_slots, last_menu = menus.human_slots, options = options,
         countdown = idle_countdown, computers = previous.computers or -100,
         order = {}, cursor = 0, previous_random = false, blink = 0, display = {}, wide = wide_wanted()}
+    state.random_pool = state.wide and load_random_pool() or nil
+    return state
 end
 
 local function pick_fighter(state)
-    local candidates = {}
-    for index, fighter in ipairs(state.fighters) do
-        if fighter.record >= 1 and fighter.id < constants.record_id_ranges.random_fighter_end_exclusive then
-            local taken = false
-            for slot = 0, 7 do
-                if state.slots[slot].fighter == index then taken = true end
+    local function candidates_for(pool)
+        local list = {}
+        for index, fighter in ipairs(state.fighters) do
+            local allowed
+            if pool then allowed = pool[fighter.id] and catalog.selectable(fighter)
+            else allowed = fighter.id < constants.record_id_ranges.random_fighter_end_exclusive end
+            if fighter.record >= 1 and allowed then
+                local taken = false
+                for slot = 0, 7 do
+                    if state.slots[slot].fighter == index then taken = true end
+                end
+                if not taken then list[#list + 1] = index end
             end
-            if not taken then candidates[#candidates + 1] = index end
         end
+        return list
     end
+    local candidates = state.random_pool and candidates_for(state.random_pool) or {}
+    if #candidates == 0 then candidates = candidates_for(nil) end
     -- The original would read an uninitialized candidate here.
     assert(#candidates > 0, "no fighter left for a random pick")
     return candidates[engine.random(#candidates) + 1]
