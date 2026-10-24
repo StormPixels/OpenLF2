@@ -21,6 +21,9 @@ ResourceNames load_resource_names(const ResourceSource& resources);
 // the resource.dat entry, where Darkfiren keeps the bitmaps resource.dat does not list, then the
 // `lf2_exe/` folder written by tools/extract_lf2_exe.py. The executable itself is the caller's last resort.
 std::vector<std::string> bitmap_candidates(std::string_view name, const ResourceNames& names);
+// The `id:` values of the block `<name>` ... `<name>_end` of a data file (LF2 Darkfiren's mode4.dat `<random>`),
+// at most 100; empty when the file or the block is missing.
+std::vector<int> block_ids(const ResourceSource& resources, std::string_view path, std::string_view block);
 // A numeric scalar of `data/system.dat` such as `spark_w: 99` (LF2 Darkfiren), if present.
 std::optional<int> system_number(const ResourceSource& resources, std::string_view key);
 // The recording version and key digits of `lf2_exe/recording.txt` (line 1: version, line 2: digits).
