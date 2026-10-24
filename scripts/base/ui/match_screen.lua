@@ -91,58 +91,6 @@ local function advance_sparks(list, drawn)
     return drawn
 end
 
--- LF2 Darkfiren's Widescreen_Radar frame style (frame/8/ws_radar.dat): beside the four columns of HP frames, a
--- 226x108 panel with one 6x6 dot per object. Fighters are drawn in their team's colour (a dead one dark), balls,
--- prisoners and drinks in their type's; only the states the file lists are shown. A dot is placed by the object's
--- x over the stage's width and its z over the stage's depth, inside the panel's 6 pixel margin.
-local radar = {x = 792, y = 0, width = 226, height = 108, margin = 6, dot = 6, panel = "sprite/radar/base.bmp"}
-local radar_kinds = {[3] = "sprite/radar/type3.bmp", [5] = "sprite/radar/type5.bmp", [6] = "sprite/radar/type6.bmp"}
-local radar_states = {}
-for index = 0, 19 do radar_states[index] = true end
-for _, index in ipairs({100, 301, 500, 501, 1700, 1000, 1001, 1002, 1003, 1004, 3000, 3006, 3007}) do
-    radar_states[index] = true
-end
-local radar_known
-local function radar_wanted()
-    if radar_known == nil then radar_known = pcall(engine.read_resource, radar.panel) end
-    return radar_known
-end
-local function radar_team(team)
-    if team >= 1 and team <= 5 then return "sprite/radar/team" .. team .. ".bmp" end
-    if team == 0 then return "sprite/radar/team5.bmp" end
-    return "sprite/radar/team2.bmp"
-end
-
-local function draw_radar(context, current, view)
-    context.image(radar.panel, radar.x, radar.y, false)
-    local stage = current.stage
-    local stage_width = math.max(1, stage.width or constants.screen.width)
-    local near, far = stage.zboundary and stage.zboundary[1] or 0, stage.zboundary and stage.zboundary[2] or 0
-    local depth = math.max(1, far - near)
-    local room_x = radar.width - 2 * radar.margin - radar.dot
-    local room_y = radar.height - 2 * radar.margin - radar.dot
-    local function dot(entry, picture)
-        local x = math.max(0, math.min(room_x, math.floor(entry.x * room_x / stage_width)))
-        local y = math.max(0, math.min(room_y, math.floor((entry.z - near) * room_y / depth)))
-        context.image(picture, radar.x + radar.margin + x, radar.y + radar.margin + y, false)
-    end
-    -- Balls, prisoners and drinks first, then the dead, then the living fighters on top.
-    for _, entry in ipairs(view.items) do
-        local picture = radar_kinds[entry.record.kind]
-        if picture and radar_states[entry.record.frame(entry.frame).state] then dot(entry, picture) end
-    end
-    for pass = 1, 2 do
-        for _, entry in ipairs(view.items) do
-            if entry.record.kind == constants.record_kinds.character
-               and radar_states[entry.record.frame(entry.frame).state] then
-                local dead = entry.hp <= 0
-                if pass == 1 and dead then dot(entry, "sprite/radar/dead.bmp")
-                elseif pass == 2 and not dead then dot(entry, radar_team(entry.team)) end
-            end
-        end
-    end
-end
-
 function screen.snapshot(state, snapshot)
     snapshot = snapshot or {items = {}}
     local order, count = snapshot.items, 0
@@ -499,8 +447,7 @@ end
 
 function screen.draw(state, context, window_bounds)
     local view_width = constants.screen.width
-    local wide_layout = options.current().battlefield_layout == options.wide_layout
-    if wide_layout then
+    if options.current().battlefield_layout == options.wide_layout then
         -- LF2 Darkfiren's super widescreen: the picture is 1333 wide whatever the window; a window that is
         -- even wider shows more of the stage, and a narrower one is letterboxed by the platform. The simulation
         -- keeps its classic 794 wide view; the expanded battlefield below shows the rest.
@@ -597,7 +544,6 @@ function screen.draw(state, context, window_bounds)
         end
     end
     draw_status(context, current)
-    if wide_layout and radar_wanted() then draw_radar(context, current, view) end
     if view.paused then
         context.image("pe/pause", 360, 288, true)
         return
