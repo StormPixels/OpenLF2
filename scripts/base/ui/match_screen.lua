@@ -12,6 +12,16 @@ local sounds = require("base/game/sounds")
 local rumble = require("base/game/rumble")
 local controls = require("base/ui/controls")
 local options = require("base/game/options")
+-- The HUD, pause picture and mode line are laid out for the classic 794 wide picture. In LF2 Darkfiren's super
+-- widescreen layout the picture is 1333 wide: wide_gap() is the extra width (for things at the right corner) and
+-- wide_center() half of it (for things in the middle). Both are 0 in the classic layout.
+local function wide_gap()
+    if options.current().battlefield_layout == options.wide_layout then
+        return constants.screen.wide_width - constants.screen.width
+    end
+    return 0
+end
+local function wide_center() return math.floor(wide_gap() / 2 + 0.5) end
 local screen = {}
 local replay_lines, mode_line
 
@@ -207,7 +217,7 @@ mode_line = function(context, current, replaying)
         -- `base` ends with a space; its parts are translated one by one.
         mode_text = i18n.tr(base:sub(1, -2)) .. " " .. i18n.tr(suffixes[current.difficulty] or "")
     end
-    if mode_text ~= "" then bold_text(context, mode_text, 0x316 - font.width(mode_text), replaying and 0x1fe or 0x213) end
+    if mode_text ~= "" then bold_text(context, mode_text, 0x316 + wide_gap() - font.width(mode_text), replaying and 0x1fe or 0x213) end
 end
 
 local function label_font(team)
@@ -313,7 +323,7 @@ end
 
 local function draw_status(context, state)
     for slot = 0, 7 do
-        local row, column = math.floor(slot / 4) * 54, (slot % 4) * 198
+        local row, column = math.floor(slot / 4) * 54, (slot % 4) * 198 + wide_center()
         context.image("pe/frame", column, row, false)
         local value = state.items[slot] or state.items[slot + 10]
         if value then
@@ -545,7 +555,7 @@ function screen.draw(state, context, window_bounds)
     end
     draw_status(context, current)
     if view.paused then
-        context.image("pe/pause", 360, 288, true)
+        context.image("pe/pause", 360 + wide_center(), 288, true)
         return
     end
     -- After the end loop: the demo's exit hint and DEMO picture, or the function-key line (GDI
