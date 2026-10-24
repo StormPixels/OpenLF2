@@ -24,6 +24,7 @@ local function origin(slot)
     return (slot % per_row) * 153 + shift, math.floor(slot / per_row) * 212
 end
 local wide_picture, wide_known = "sprite/ui/charmenu3.bmp"
+local wide_frame = "sprite/sys/julian_f.bmp"
 -- The wide menu needs the wide battlefield layout and a game that has the picture (LF2 Darkfiren).
 local function wide_wanted()
     if user_options.current().battlefield_layout ~= user_options.wide_layout then return false end
@@ -153,9 +154,9 @@ end
 
 local function empty_slot(state, index, slot, keys, col, row, all_empty)
     if state.countdown == idle_countdown then
-        image(state, state.blink % 5 < 3 and "pe/cma" or "pe/cma2", col + 147, row + 94)
+        image(state, state.blink % 5 < 3 and "pe/cma" or "pe/cma2", col + 147, row + 120)
     elseif state.countdown >= 0 then
-        image(state, "pe/cm" .. (math.floor(state.countdown / 30) + 1), col + 147, row + 94)
+        image(state, "pe/cm" .. (math.floor(state.countdown / 30) + 1), col + 181, row + 125)
     end
     if pressed(keys, "c") then
         if trigger(slot, state.last_menu == menus.human_slots) then
@@ -529,6 +530,119 @@ local function music_option(state, left, right)
     text(state, i18n.tr("(Press Left/Right to change)"), 603, 20, music_hint)
 end
 
+-- LF2 Darkfiren's <grid_bg> (mode4.dat): a panel at (180, 3) with the backgrounds one under the other, each a 212x109
+-- picture every 135 pixels from (220, 15) with its name 250 to the right, four to a page. A tap on a picture chooses
+-- that background; the keys move a cursor (up, down), choose (attack) or leave (jump). It replaces the cycling of the
+-- Background row in the wide menu; Stage mode still cycles its stage there.
+local grid_bg = {panel_x = 180, panel_y = 3, panel_w = 500, panel_h = 542, x = 220, y = 15, w = 212, h = 109,
+    step = 135, rows = 4, name_x = 250, name_y = 40}
+local grid_available = {}
+local function grid_has(path)
+    if grid_available[path] == nil then grid_available[path] = pcall(engine.read_resource, path) end
+    return grid_available[path]
+end
+local function grid_picture(state, row)
+    if row == constants.background_rows.random then return "sprite/ui/grid/bg_grid_random.bmp" end
+    local folder = "lor"
+    if row ~= constants.background_rows.lee_on_road then
+        local entry = state.backgrounds[row + 1]
+        -- bg/sys/<name>/bg.dat has its picture in bg/sys/grid/<name>.bmp; the templates share temp.bmp.
+        folder = entry and entry.path:match("bg/sys/([^/]+)/") or "temp"
+    end
+    return "bg/sys/grid/" .. folder .. ".bmp"
+end
+local function grid_cells(state)
+    local cells = {constants.background_rows.random, constants.background_rows.lee_on_road}
+    for index = 0, #state.backgrounds - 1 do cells[#cells + 1] = index end
+    return cells
+end
+local function grid_follow(grid)
+    if grid.cursor - 1 < grid.top then grid.top = grid.cursor - 1
+    elseif grid.cursor - 1 >= grid.top + grid_bg.rows then grid.top = grid.cursor - grid_bg.rows end
+end
+local function open_grid(state)
+    local cells = grid_cells(state)
+    local current = state.options.random_background and constants.background_rows.random or state.options.background
+    local cursor = 1
+    for position, row in ipairs(cells) do if row == current then cursor = position; break end end
+    state.grid = {cells = cells, cursor = cursor, top = 0}
+    grid_follow(state.grid)
+end
+local function grid_choose(state, row)
+    state.options.random_background = row == constants.background_rows.random
+    state.options.background = row
+    sounds.direct(state, "ok")
+    state.grid = nil
+end
+local function grid_popup(state, previous_menu)
+    local grid, held = state.grid, state.held
+    local last_top = math.max(0, #grid.cells - grid_bg.rows)
+    local scrollable = #grid.cells > grid_bg.rows
+    local function inside(x, y, left, top, width, height) return x >= left and x < left + width and y >= top and y < top + height end
+    if held.click and held.pointer_x and held.pointer_x >= 0 and held.pointer_y and held.pointer_y >= 0 then
+        local px, py = held.pointer_x, held.pointer_y
+        for line = 0, grid_bg.rows - 1 do
+            local row = grid.cells[grid.top + line + 1]
+            if row and inside(px, py, grid_bg.x, grid_bg.y + line * grid_bg.step, grid_bg.w, grid_bg.h) then
+                grid_choose(state, row)
+                return
+            end
+        end
+        if scrollable and inside(px, py, 600, 8, 80, 26) then
+            grid.top = math.max(0, grid.top - grid_bg.rows)
+            grid.cursor = math.max(grid.top + 1, math.min(grid.cursor, grid.top + grid_bg.rows))
+        elseif scrollable and inside(px, py, 590, 506, 90, 28) then
+            grid.top = math.min(last_top, grid.top + grid_bg.rows)
+            grid.cursor = math.max(grid.top + 1, math.min(grid.cursor, grid.top + grid_bg.rows))
+        elseif not inside(px, py, grid_bg.panel_x, grid_bg.panel_y, grid_bg.panel_w, grid_bg.panel_h) then
+            state.grid = nil
+            return
+        end
+    end
+    local keys = {}
+    local accept = previous_menu == menus.options
+    for index = 0, 7 do
+        local slot = state.slots[index]
+        if slot.ready then
+            local keys_held = state.held[index] or ""
+            local key
+            for _, candidate in ipairs({"u", "d", "c", "b"}) do
+                if pressed(keys_held, candidate) then key = candidate; break end
+            end
+            if key then keys[key] = trigger(slot, accept) or keys[key]
+            else slot.latched = false end
+        end
+    end
+    if keys.u then grid.cursor = math.max(1, grid.cursor - 1) end
+    if keys.d then grid.cursor = math.min(#grid.cells, grid.cursor + 1) end
+    grid_follow(grid)
+    if keys.b then state.grid = nil; return end
+    if keys.c then grid_choose(state, grid.cells[grid.cursor]); return end
+    image(state, "sprite/ui/grid/box_bg.bmp", grid_bg.panel_x, grid_bg.panel_y)
+    local chosen = state.options.random_background and constants.background_rows.random or state.options.background
+    for line = 0, grid_bg.rows - 1 do
+        local position = grid.top + line + 1
+        local row = grid.cells[position]
+        if row then
+            local x, y = grid_bg.x, grid_bg.y + line * grid_bg.step
+            local picture = grid_picture(state, row)
+            if grid_has(picture) then image(state, picture, x, y) end
+            local gray = row == chosen and 255 or (position == grid.cursor and 140 or nil)
+            if gray then
+                fill(state, x - 2, y - 2, grid_bg.w + 4, 2, gray)
+                fill(state, x - 2, y + grid_bg.h, grid_bg.w + 4, 2, gray)
+                fill(state, x - 2, y - 2, 2, grid_bg.h + 4, gray)
+                fill(state, x + grid_bg.w, y - 2, 2, grid_bg.h + 4, gray)
+            end
+            text(state, background_name(state, row), x + grid_bg.name_x, y + grid_bg.name_y, white)
+        end
+    end
+    if scrollable then
+        text(state, "Up", 620, 14, option_blue)
+        text(state, "Down", 612, 512, option_blue)
+    end
+end
+
 local function options_menu(state, previous_menu, context)
     local options = state.options
     sprite(state, options_sheet, {348, 0, 304, 156}, 3, 3, false)
@@ -547,6 +661,7 @@ local function options_menu(state, previous_menu, context)
         text(state, background_name(state, options.background), 174, 91, option_blue)
     end
     text(state, difficulties[options.difficulty] or "", 174, 115, option_blue)
+    if state.grid then return grid_popup(state, previous_menu) end
 
     local keys = {}
     local accept = previous_menu == menus.options
@@ -599,6 +714,8 @@ local function options_menu(state, previous_menu, context)
     elseif options.row == option_rows.background then
         if state.mode == constants.modes.stage then
             options.stage_level = (options.stage_level + 10) % 60
+        elseif state.wide then
+            open_grid(state)
         else
             options.random_background = false
             if options.background == constants.background_rows.random then options.background = constants.background_rows.lee_on_road
@@ -732,6 +849,8 @@ function selection.update(state, held, context)
     if state.wide then
         roster_panel(state)
         image(state, wide_picture, 10, 33)
+        -- mode4.dat's <frame>: a portrait of Julian in the empty left margin of the row of slots.
+        if grid_has(wide_frame) then image(state, wide_frame, 25, 50) end
     else
         image(state, "pe/charmenu", 40, 33)
     end
