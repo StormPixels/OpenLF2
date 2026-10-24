@@ -70,6 +70,31 @@ std::vector<std::string> bitmap_candidates(std::string_view name, const Resource
     return paths;
 }
 
+std::vector<int> block_ids(const ResourceSource& resources, std::string_view path, std::string_view block) {
+    std::vector<int> ids;
+    auto text = read_data_text(resources, path, 1024 * 1024);
+    if (!text) return ids;
+    const std::string opening = "<" + std::string(block) + ">";
+    const std::string closing = "<" + std::string(block) + "_end>";
+    const std::string_view all(text->data(), text->size());
+    bool inside = false;
+    for (std::size_t start = 0; start < all.size() && ids.size() < 100;) {
+        auto end = all.find('\n', start);
+        if (end == std::string_view::npos) end = all.size();
+        const auto line = trim(all.substr(start, end - start));
+        start = end + 1;
+        if (line == opening) { inside = true; continue; }
+        if (line == closing) { if (inside) break; continue; }
+        if (!inside || !line.starts_with("id:")) continue;
+        const auto value = trim(line.substr(3));
+        int number = 0;
+        std::size_t used = 0;
+        while (used < value.size() && value[used] >= '0' && value[used] <= '9' && used < 6) number = number * 10 + (value[used++] - '0');
+        if (used > 0) ids.push_back(number);
+    }
+    return ids;
+}
+
 std::optional<int> system_number(const ResourceSource& resources, std::string_view key) {
     auto text = read_data_text(resources, "data/system.dat", 1024 * 1024);
     if (!text) return std::nullopt;
