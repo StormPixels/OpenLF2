@@ -24,7 +24,6 @@ local function origin(slot)
     return (slot % per_row) * 153 + shift, math.floor(slot / per_row) * 212
 end
 local wide_picture, wide_known = "sprite/ui/charmenu3.bmp"
-local wide_frame = "sprite/sys/julian_f.bmp"
 -- The wide menu needs the wide battlefield layout and a game that has the picture (LF2 Darkfiren).
 local function wide_wanted()
     if user_options.current().battlefield_layout ~= user_options.wide_layout then return false end
@@ -154,9 +153,9 @@ end
 
 local function empty_slot(state, index, slot, keys, col, row, all_empty)
     if state.countdown == idle_countdown then
-        image(state, state.blink % 5 < 3 and "pe/cma" or "pe/cma2", col + 147, row + 120)
+        image(state, state.blink % 5 < 3 and "pe/cma" or "pe/cma2", col + 147, row + 94)
     elseif state.countdown >= 0 then
-        image(state, "pe/cm" .. (math.floor(state.countdown / 30) + 1), col + 181, row + 125)
+        image(state, "pe/cm" .. (math.floor(state.countdown / 30) + 1), col + 147, row + 94)
     end
     if pressed(keys, "c") then
         if trigger(slot, state.last_menu == menus.human_slots) then
@@ -302,7 +301,9 @@ local function slots_pass(state, held)
 end
 
 local function computer_count_menu(state, previous_menu)
-    image(state, "pe/cmc", 218, 215)
+    -- The dialog is laid out for the classic 794-wide picture; the wide menu moves it to the middle of its picture.
+    local dx = state.wide and math.floor((constants.screen.wide_width - constants.screen.width) / 2 + 0.5) or 0
+    image(state, "pe/cmc", 218 + dx, 215)
     local free, sides, teams = 0, 0, {}
     for index = 0, 7 do
         local slot = state.slots[index]
@@ -362,7 +363,7 @@ local function computer_count_menu(state, previous_menu)
         end
     end
     for number = 0, 7 do
-        local x = 280 + number * 30
+        local x = 280 + number * 30 + dx
         -- Digits the choice cannot reach (below the minimum, or more than the free slots) are greyed.
         local unavailable = number < minimum or free < number
         text(state, tostring(number), x + 6, 286, unavailable and count_greyed or white, count_box)
@@ -526,8 +527,10 @@ local function music_option(state, left, right)
     else
         music.enabled = true
     end
-    text(state, i18n.tr("Music: %s", i18n.tr(label)), 603, 3, music_title)
-    text(state, i18n.tr("(Press Left/Right to change)"), 603, 20, music_hint)
+    -- Top right corner: in the wide menu it follows the right edge of the wider picture.
+    local right_edge = state.wide and constants.screen.wide_width - constants.screen.width or 0
+    text(state, i18n.tr("Music: %s", i18n.tr(label)), 603 + right_edge, 3, music_title)
+    text(state, i18n.tr("(Press Left/Right to change)"), 603 + right_edge, 20, music_hint)
 end
 
 -- LF2 Darkfiren's <grid_bg> (mode4.dat): a panel at (180, 3) with the backgrounds one under the other, each a 212x109
@@ -849,8 +852,6 @@ function selection.update(state, held, context)
     if state.wide then
         roster_panel(state)
         image(state, wide_picture, 10, 33)
-        -- mode4.dat's <frame>: a portrait of Julian in the empty left margin of the row of slots.
-        if grid_has(wide_frame) then image(state, wide_frame, 25, 50) end
     else
         image(state, "pe/charmenu", 40, 33)
     end
