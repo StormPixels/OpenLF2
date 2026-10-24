@@ -555,6 +555,12 @@ public:
                 ? std::to_string(*width) + " " + std::to_string(*height) : std::string();
             return Bytes(text.begin(), text.end());
         }
+        if (*normalized == "game/random_pool") {
+            // LF2 Darkfiren: the <random> block of mode4.dat lists the fighters a random pick may give.
+            std::string text;
+            for (const int id : block_ids(archive_, "data/mode/mode4.dat", "random")) text += std::to_string(id) + " ";
+            return Bytes(text.begin(), text.end());
+        }
         if (normalized->starts_with("pe/")) {
             auto name = normalized->substr(3);
             for (auto& character : name) {
